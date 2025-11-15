@@ -1,0 +1,8 @@
+logging
+netfilterqueue
+scapy
+pandas
+numpy
+scikit-learn
+catboost
+matplotlib
