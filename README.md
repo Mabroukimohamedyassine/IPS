@@ -1,131 +1,140 @@
-#Intrusion Prevention System (IPS) — Packet Capture and ML-Based Filtering
+# Intrusion Prevention System (IPS) — Real-Time Packet Capture and ML-Based Filtering
+A Python-based Intrusion Prevention System (IPS) that captures network packets, extracts features into a structured format, and classifies each packet as malicious or benign using a machine learning model.
 
-This project implements a real-time Intrusion Prevention System (IPS) capable of capturing network packets, transforming them into structured features, and classifying each packet as malicious or benign using a machine-learning model.
+This project uses NFQueue for packet interception and CatBoost for classification.
 
-📌 Project Architecture
-           ┌────────────┐          ┌──────────────┐          ┌───────────┐
-Incoming → │ Packet      │  NFQ     │ transform.py │  Feature │ ML Model   │ → Decision
-Packets    │ Capture     │ ─────→   │ (DataFrame)  │ ─────→   │ (CatBoost) │ → Accept/Drop
-           └────────────┘          └──────────────┘          └───────────┘
+Table of Contents
 
-🔹 1. Packet Capture (NFQueue)
+Project Overview
 
-A Python script hooks into iptables and forwards packets into an NFQueue.
-Each packet is intercepted in real time and sent to the processing pipeline.
+Architecture
 
-🔹 2. Packet Transformation
+Features
 
-transform.py converts each raw packet into a structured Pandas DataFrame row, extracting relevant features such as:
+Project Structure
 
-Protocol (TCP/UDP/HTTP, etc.)
+Installation
 
-Payload statistics
+Usage
 
-Packet metadata (length, flags, etc.)
+Training the ML Model
 
-This produces a consistent format for the ML model.
+Future Improvements
 
-🔹 3. Machine Learning Classification
+Project Overview
 
-Extracted features are passed to a trained CatBoostClassifier, which predicts whether the packet is malicious or benign.
+The IPS captures incoming packets in real-time, extracts relevant features, and uses a machine learning classifier to make decisions. It then accepts safe packets or drops malicious ones immediately.
 
-🔹 4. Decision & Enforcement
+Key advantages:
 
-Benign → ACCEPT (packet continues normally)
+Lightweight, real-time packet processing
 
-Malicious → DROP (packet is blocked immediately)
+Payload-aware feature extraction
 
-📁 Project Structure
+ML-based threat detection
+
+Architecture
+           ┌────────────┐        ┌──────────────┐        ┌───────────┐
+Incoming → │ Packet      │  NFQ   │ transform.py │  ML    │ Decision  │
+Packets    │ Capture     │ ────→  │ (DataFrame)  │ ────→ │ ACCEPT/DROP
+           └────────────┘        └──────────────┘        └───────────┘
+
+
+Step-by-Step Flow:
+
+Packet Capture (NFQueue): Intercepts packets from the network in real-time.
+
+Packet Transformation: transform.py converts packets into a Pandas DataFrame with structured features (protocol, payload stats, metadata).
+
+ML Classification: CatBoost predicts whether a packet is malicious or benign.
+
+Decision Enforcement: Safe packets are accepted, malicious packets are dropped.
+
+Features
+
+Real-time packet interception using NFQueue
+
+Packet-to-DataFrame transformation for ML input
+
+ML-based detection using CatBoost
+
+Immediate packet DROP/ACCEPT decision
+
+Modular and extendable design
+
+Project Structure
 IPS/
 │
 ├── Capture/
-│   ├── nfqueue_runner.py        # NFQueue packet interception
+│   └── nfqueue_runner.py        # Real-time packet interception
 │
 ├── Preprocessing/
-│   ├── transform.py             # Converts packet → pandas DataFrame
+│   └── transform.py             # Converts packet → pandas DataFrame
 │
 ├── ML/
 │   ├── dataset.csv              # Synthetic or real dataset
 │   ├── train_model.py           # CatBoost training pipeline
-│   ├── model.cbm                # Saved trained model
+│   └── model.cbm                # Saved trained model
 │
-├── README.md                    # Documentation
-└── requirements.txt             # Dependencies
+├── README.md                    # Project documentation
+└── requirements.txt             # Python dependencies
 
-⚙️ How It Works (Step‑By‑Step)
-1️⃣ Redirect packets into NFQueue
+Installation
+
+Clone the repository:
+
+git clone https://github.com/yourusername/IPS.git
+cd IPS
+
+
+Create a virtual environment and install dependencies:
+
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate     # Windows
+pip install -r requirements.txt
+
+
+Set up NFQueue (requires root privileges):
+
 sudo iptables -I INPUT -j NFQUEUE --queue-num 0
 
-2️⃣ Python intercepts packets
+Usage
 
-nfqueue_runner.py receives packets in real time.
+Start the NFQueue runner:
 
-3️⃣ Packet transformation
+python Capture/nfqueue_runner.py
 
-transform.py converts each packet into a Pandas row containing structured features.
 
-4️⃣ ML model classifies
+Each captured packet will be transformed and classified automatically.
 
-The trained CatBoost model predicts:
+Decisions (ACCEPT/DROP) are applied in real-time.
 
-0 = benign
+Training the ML Model
 
-1 = malicious
+CatBoost is used because it handles mixed numerical and categorical data, missing values, and small datasets efficiently.
 
-5️⃣ Packet is accepted or dropped
-🧪 Training the ML Model
-
-CatBoost is used because:
-
-Handles numerical and categorical data
-
-Fast training
-
-Robust with small datasets
-
-Handles missing values automatically
-
-To train:
+To train a new model:
 
 python ML/train_model.py
 
 
-This script:
-✔ Loads the dataset
-✔ Preprocesses features
-✔ Trains CatBoost
-✔ Saves model.cbm
+This script will:
 
-🛡️ Features
+Load the dataset (dataset.csv)
 
-Real-time packet capture
+Preprocess features
 
-Payload-aware feature extraction
+Train the CatBoost model
 
-CatBoost ML-based detection
+Save the model as model.cbm
 
-Immediate DROP/ACCEPT enforcement
+Future Improvements
 
-Modular architecture
+Integrate anomaly detection alongside CatBoost
 
-🚀 Requirements
+Add logging and alert dashboard
 
-scapy
+Extend with protocol-specific features
 
-catboost
-
-numpy
-
-pandas
-
-netfilterqueue
-
-🔮 Future Improvements
-
-Add anomaly detection models
-
-Logging and alerting system
-
-GUI dashboard
-
-Integration with Suricata or other IDS for cross-validation
+Optional integration with Suricata or other IDS systems
