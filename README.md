@@ -1,4 +1,4 @@
-Network Packet Malware Classifier
+# Network Packet Malware Classifier
 
 A real-time network packet filter powered by machine learning. This project classifies network packets as normal or malicious using a CatBoost model, integrating NFQueue for packet interception and Scapy for packet parsing and feature extraction.
 
