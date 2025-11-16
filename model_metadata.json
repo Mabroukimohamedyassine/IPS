@@ -1,0 +1,40 @@
+{
+  "model_type": "CatBoostClassifier",
+  "version": "1.0",
+  "created_at": "2025-11-15T19:36:18.505174",
+  "training_time_seconds": 1.62,
+  "features": [
+    "ip_version",
+    "ip_ihl",
+    "ip_len",
+    "ip_ttl",
+    "ip_proto",
+    "src_port",
+    "dst_port",
+    "tcp_flags",
+    "payload_len",
+    "payload_mean",
+    "payload_std",
+    "has_shellcode_pattern",
+    "has_suspicious_strings",
+    "entropy",
+    "printable_ratio"
+  ],
+  "num_features": 15,
+  "hyperparameters": {
+    "iterations": 600,
+    "learning_rate": 0.05,
+    "depth": 8,
+    "loss_function": "Logloss",
+    "eval_metric": "AUC",
+    "random_state": 42,
+    "task_type": "GPU"
+  },
+  "evaluation_metrics": {
+    "accuracy": 0.99,
+    "precision": 0.9865,
+    "recall": 1.0,
+    "f1_score": 0.9932,
+    "roc_auc": 1.0
+  }
+}

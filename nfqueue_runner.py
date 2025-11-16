@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 NFQueue Packet Filter with ML Decision
-Uses transform.py to extract features
+Uses T.py to extract features
 Uses ml.py (CatBoost model) to classify packets
 """
 
@@ -9,8 +9,8 @@ import logging
 from netfilterqueue import NetfilterQueue
 from scapy.all import IP
 
-# Import transform function
-from transform import packet_to_dataframe_enhanced
+# Import T function
+from Transform import packet_to_dataframe_enhanced
 
 # Import ML prediction function
 from ml import predict_packet
