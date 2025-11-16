@@ -1,11 +1,7 @@
 """
 Network Packet Malware Classifier using CatBoost
 ==================================================
-Production-ready script for training and deploying a CatBoost classifier
-to detect malicious network packets based on packet features.
-
-Author: Cleaned version
-Python: 3.9+
+Custom preprocessing for 19-column malware dataset.
 """
 
 import pandas as pd
@@ -25,13 +21,14 @@ from catboost import CatBoostClassifier, Pool
 
 import matplotlib.pyplot as plt
 
-# Configuration
-CSV_FILE = "synthetic_packet_dataset.csv"
+# ---------------------
+# CONFIG
+# ---------------------
+CSV_FILE = "malware analysis.csv"
 MODEL_FILE = "catboost_packet_classifier.cbm"
 METADATA_FILE = "model_metadata.json"
 RANDOM_STATE = 42
 
-# Hyperparameters
 HYPERPARAMS = {
     'iterations': 600,
     'learning_rate': 0.05,
@@ -40,256 +37,235 @@ HYPERPARAMS = {
     'eval_metric': 'AUC',
     'random_state': RANDOM_STATE,
     'verbose': 100,
-    'task_type': 'GPU',  # fallback to CPU if GPU unavailable
+    'task_type': 'GPU',
     'devices': '0'
 }
 
-_loaded_model: CatBoostClassifier = None  # Lazy loaded model
+_loaded_model: CatBoostClassifier = None
 
 
+# =========================================================
+# 1. LOAD DATA
+# =========================================================
 def load_data(filepath: str) -> pd.DataFrame:
-    """Load CSV dataset into pandas DataFrame."""
     print(f"\n{'='*60}\nSTEP 1: Loading Dataset\n{'='*60}")
     try:
-        df = pd.read_csv(filepath)
+        df = pd.read_csv(filepath, header=None)
         print(f"✓ Loaded {len(df)} records | Shape: {df.shape}")
-        print(f"Columns: {list(df.columns)}")
+        print("✓ First row:", df.iloc[0].tolist())
         return df
-    except FileNotFoundError:
-        raise FileNotFoundError(f"CSV file not found: {filepath}")
     except Exception as e:
-        raise Exception(f"Error loading data: {str(e)}")
+        raise Exception(f"Error loading data: {e}")
 
 
+# =========================================================
+# 2. PREPROCESS FOR YOUR 19-COLUMN DATASET
+# =========================================================
 def preprocess_data(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
-    """Preprocess dataset: remove payload, generate labels, handle missing."""
-    print(f"\n{'='*60}\nSTEP 2: Preprocessing Data\n{'='*60}")
-    df = df.copy()
+    print(f"\n{'='*60}\nSTEP 2: Preprocessing Malware Dataset\n{'='*60}")
 
-    if 'payload_bytes' in df.columns:
-        df.drop('payload_bytes', axis=1, inplace=True)
-        print("✓ Removed 'payload_bytes' column")
+    if df.shape[1] != 19:
+        raise ValueError(f"Dataset must have 19 columns, found {df.shape[1]}")
 
-    if 'malicious' not in df.columns:
-        print("⚠ 'malicious' column missing. Generating labels...")
-        df['malicious'] = (
-            (df.get('has_shellcode_pattern', 0) == 1) |
-            (df.get('has_suspicious_strings', 0) == 1) |
-            (df.get('entropy', 0) > 6) |
-            (df.get('payload_len', 0) > 150)
-        ).astype(int)
-        print("✓ Generated 'malicious' labels")
-    else:
-        print("✓ Found existing 'malicious' column")
+    # Assign human-readable headers
+    df.columns = [
+        "duration",
+        "protocol_type",
+        "service",
+        "flag",
+        "src_bytes",
+        "dst_bytes",
+        "land",
+        "wrong_fragment",
+        "urgent",
+        "hot",
+        "num_failed_logins",
+        "logged_in",
+        "num_compromised",
+        "root_shell",
+        "su_attempted",
+        "num_root",
+        "num_file_creations",
+        "num_shells",
+        "label"
+    ]
 
+    print("✓ Assigned 19 custom feature names")
+
+    # Convert labels to binary
+    df["malicious"] = (df["label"] != "normal.").astype(int)
+    df.drop("label", axis=1, inplace=True)
+    print("✓ Converted labels: normal.=0, attack=1")
+
+    # Categorical fields
+    cat_cols = ["protocol_type", "service", "flag"]
+    print("✓ Categorical features:", cat_cols)
+
+    # One-hot encoding
+    df = pd.get_dummies(df, columns=cat_cols, drop_first=True)
+    print("✓ One-hot encoded categorical features")
+
+    # Missing value handling
     if df.isnull().any().any():
-        print("⚠ Missing values found. Filling with 0")
         df.fillna(0, inplace=True)
-    else:
-        print("✓ No missing values detected")
+        print("✓ Filled missing values")
 
-    y = df['malicious']
-    X = df.drop('malicious', axis=1)
+    # Split X and y
+    y = df["malicious"]
+    X = df.drop("malicious", axis=1)
 
-    class_dist = y.value_counts()
-    print(f"\nClass Distribution:")
-    print(f"  Benign (0): {class_dist.get(0,0)} ({class_dist.get(0,0)/len(y)*100:.1f}%)")
-    print(f"  Malicious (1): {class_dist.get(1,0)} ({class_dist.get(1,0)/len(y)*100:.1f}%)")
-    print(f"Feature columns ({len(X.columns)}): {list(X.columns)}")
+    print(f"✓ Total features: {len(X.columns)}")
+    print("✓ First 10 features:", list(X.columns)[:10])
+    print("\nClass distribution:")
+    print(y.value_counts())
 
     return X, y
 
 
-def train_model(X_train: pd.DataFrame, y_train: pd.Series,
-                X_test: pd.DataFrame, y_test: pd.Series) -> Tuple[CatBoostClassifier, float]:
-    """Train CatBoost classifier with GPU/CPU fallback."""
-    print(f"\n{'='*60}\nSTEP 3: Training CatBoost Classifier\n{'='*60}")
-    print("Hyperparameters (partial):")
-    for k, v in HYPERPARAMS.items():
-        if k not in ['verbose', 'devices']:
-            print(f"  {k}: {v}")
-
-    train_pool = Pool(X_train, y_train)
-    test_pool = Pool(X_test, y_test)
+# =========================================================
+# 3. TRAIN MODEL
+# =========================================================
+def train_model(X_train, y_train, X_test, y_test):
+    print(f"\n{'='*60}\nSTEP 3: Training Model\n{'='*60}")
 
     params = HYPERPARAMS.copy()
     model = CatBoostClassifier(**params)
 
-    start_time = time.time()
+    train_pool = Pool(X_train, y_train)
+    test_pool = Pool(X_test, y_test)
+
+    start = time.time()
     try:
         model.fit(train_pool, eval_set=test_pool, use_best_model=True, plot=False)
-    except Exception as e:
-        if 'GPU' in str(e) or 'CUDA' in str(e):
-            print("⚠ GPU training failed. Falling back to CPU...")
-            params['task_type'] = 'CPU'
-            params.pop('devices', None)
-            model = CatBoostClassifier(**params)
-            model.fit(train_pool, eval_set=test_pool, use_best_model=True, plot=False)
-        else:
-            raise e
+    except Exception:
+        print("⚠ GPU not available, switching to CPU")
+        params["task_type"] = "CPU"
+        params.pop("devices", None)
+        model = CatBoostClassifier(**params)
+        model.fit(train_pool, eval_set=test_pool, use_best_model=True, plot=False)
 
-    training_time = time.time() - start_time
-    print(f"✓ Training completed in {training_time:.2f} seconds")
-    return model, training_time
+    train_time = time.time() - start
+    print(f"✓ Training completed in {train_time:.2f} seconds")
+    return model, train_time
 
 
-def evaluate_model(model: CatBoostClassifier, X_test: pd.DataFrame,
-                   y_test: pd.Series) -> Dict[str, float]:
-    """Evaluate model and generate plots."""
-    print(f"\n{'='*60}\nSTEP 4: Model Evaluation\n{'='*60}")
-    y_pred = model.predict(X_test)
-    y_pred_proba = model.predict_proba(X_test)[:, 1]
+# =========================================================
+# 4. EVALUATION
+# =========================================================
+def evaluate_model(model, X_test, y_test):
+
+    print(f"\n{'='*60}\nSTEP 4: Evaluation\n{'='*60}")
+
+    pred = model.predict(X_test)
+    prob = model.predict_proba(X_test)[:, 1]
 
     metrics = {
-        'accuracy': accuracy_score(y_test, y_pred),
-        'precision': precision_score(y_test, y_pred, zero_division=0),
-        'recall': recall_score(y_test, y_pred, zero_division=0),
-        'f1_score': f1_score(y_test, y_pred, zero_division=0),
-        'roc_auc': roc_auc_score(y_test, y_pred_proba)
+        "accuracy": accuracy_score(y_test, pred),
+        "precision": precision_score(y_test, pred, zero_division=0),
+        "recall": recall_score(y_test, pred, zero_division=0),
+        "f1_score": f1_score(y_test, pred, zero_division=0),
+        "roc_auc": roc_auc_score(y_test, prob)
     }
 
-    print("\nPerformance Metrics:")
+    print("\nMetrics:")
     for k, v in metrics.items():
-        print(f"  {k.capitalize()}: {v:.4f}")
+        print(f"{k}: {v:.4f}")
 
-    cm = confusion_matrix(y_test, y_pred)
-    print(f"\nConfusion Matrix:\n{cm}")
+    print("\nConfusion Matrix:")
+    print(confusion_matrix(y_test, pred))
 
-    feature_importance = pd.DataFrame({
-        'feature': X_test.columns,
-        'importance': model.feature_importances_
-    }).sort_values('importance', ascending=False)
-    print(f"\nTop 10 Features:")
-    print(feature_importance.head(10))
-
-    _plot_evaluation(y_test, y_pred, y_pred_proba, cm, feature_importance)
     return metrics
 
 
-def _plot_evaluation(y_test, y_pred, y_pred_proba, cm, feature_importance):
-    """Generate evaluation plots."""
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+# =========================================================
+# 5. SAVE MODEL
+# =========================================================
+def save_model(model, feature_names, metrics, train_time):
+    print(f"\n{'='*60}\nSTEP 5: Saving Model\n{'='*60}")
 
-    # Confusion Matrix
-    ax = axes[0]
-    im = ax.imshow(cm, interpolation='nearest', cmap='Blues')
-    ax.set_title('Confusion Matrix')
-    ax.set_ylabel('True')
-    ax.set_xlabel('Predicted')
-    for i in range(2):
-        for j in range(2):
-            ax.text(j, i, str(cm[i, j]), ha='center', va='center', color="white" if cm[i,j] > cm.max()/2 else "black")
-    ax.set_xticks([0,1]); ax.set_yticks([0,1])
-    ax.set_xticklabels(['Benign','Malicious'])
-    ax.set_yticklabels(['Benign','Malicious'])
-    plt.colorbar(im, ax=ax)
-
-    # ROC Curve
-    ax = axes[1]
-    fpr, tpr, _ = roc_curve(y_test, y_pred_proba)
-    roc_auc = roc_auc_score(y_test, y_pred_proba)
-    ax.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC={roc_auc:.3f})')
-    ax.plot([0,1], [0,1], color='navy', lw=2, linestyle='--')
-    ax.set_xlim([0.0,1.0]); ax.set_ylim([0.0,1.05])
-    ax.set_xlabel('False Positive Rate'); ax.set_ylabel('True Positive Rate')
-    ax.set_title('ROC Curve'); ax.legend(loc='lower right'); ax.grid(alpha=0.3)
-
-    # Feature Importance
-    ax = axes[2]
-    top_features = feature_importance.head(10)
-    ax.barh(top_features['feature'], top_features['importance'], color='steelblue')
-    ax.invert_yaxis(); ax.set_xlabel('Importance'); ax.set_title('Top 10 Features')
-    ax.grid(axis='x', alpha=0.3)
-
-    plt.tight_layout()
-    plt.savefig('model_evaluation.png', dpi=300, bbox_inches='tight')
-    print("✓ Saved evaluation plots to 'model_evaluation.png'")
-    plt.close()
-
-
-def save_model(model: CatBoostClassifier, feature_names: list,
-               metrics: Dict[str,float], training_time: float):
-    """Save trained model and metadata."""
-    print(f"\n{'='*60}\nSTEP 5: Saving Model & Metadata\n{'='*60}")
     model.save_model(MODEL_FILE)
-    print(f"✓ Model saved to '{MODEL_FILE}'")
+    print("✓ Saved CatBoost model")
 
     metadata = {
-        'model_type': 'CatBoostClassifier',
-        'version': '1.0',
-        'created_at': datetime.now().isoformat(),
-        'training_time_seconds': round(training_time,2),
-        'features': feature_names,
-        'num_features': len(feature_names),
-        'hyperparameters': {k:v for k,v in HYPERPARAMS.items() if k not in ['verbose','devices']},
-        'evaluation_metrics': {k: round(v,4) for k,v in metrics.items()}
+        "model_type": "CatBoostClassifier",
+        "created_at": datetime.now().isoformat(),
+        "training_time": round(train_time, 2),
+        "features": feature_names,
+        "metrics": metrics
     }
 
-    with open(METADATA_FILE,'w') as f:
-        json.dump(metadata, f, indent=2)
-    print(f"✓ Metadata saved to '{METADATA_FILE}'")
+    with open(METADATA_FILE, "w") as f:
+        json.dump(metadata, f, indent=4)
+
+    print("✓ Saved metadata")
 
 
-def predict_packet(features_dict: Dict[str, Any]) -> Dict[str, Any]:
-    """Predict if packet is malicious using lazy-loaded model."""
+# =========================================================
+# 6. MAIN PIPELINE
+# =========================================================
+def main():
+    print("\n" + "="*60)
+    print(" NETWORK PACKET MALWARE CLASSIFIER ")
+    print("="*60)
+
+    df = load_data(CSV_FILE)
+    X, y = preprocess_data(df)
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
+    )
+
+    model, train_time = train_model(X_train, y_train, X_test, y_test)
+    metrics = evaluate_model(model, X_test, y_test)
+    save_model(model, list(X.columns), metrics, train_time)
+
+    print("\n✓ Pipeline completed successfully.\n")
+
+
+# =========================================================
+# 7. PREDICTION FOR SINGLE PACKET
+# =========================================================
+import pandas as pd
+from catboost import CatBoostClassifier
+
+def predict_packet(packet_features: dict) -> dict:
+    """
+    Predict if a single network packet is malicious.
+    
+    Args:
+        packet_features (dict): Features of one packet in 19-column format.
+        
+    Returns:
+        dict: {
+            "predicted_class": 0 or 1,
+            "probability": float (class 1 probability),
+            "prediction_label": "normal" or "malicious"
+        }
+    """
     global _loaded_model
     if _loaded_model is None:
-        if not Path(MODEL_FILE).exists():
-            raise FileNotFoundError(f"Model file not found: {MODEL_FILE}")
         _loaded_model = CatBoostClassifier()
         _loaded_model.load_model(MODEL_FILE)
 
-    df = pd.DataFrame([features_dict])
-    # Ensure all features exist
-    for col in _loaded_model.feature_names_:
-        if col not in df.columns:
-            df[col] = 0
+    # Convert dict to DataFrame
+    df = pd.DataFrame([packet_features])
 
-    proba = float(_loaded_model.predict_proba(df)[0,1])
-    pred = int(proba > 0.5)
+    # Align columns with model training features
+    missing_cols = set(_loaded_model.feature_names_) - set(df.columns)
+    for c in missing_cols:
+        df[c] = 0  # fill missing columns with 0
+    df = df[_loaded_model.feature_names_]  # reorder columns exactly
+
+    # Predict
+    prob = _loaded_model.predict_proba(df)[:, 1][0]  # probability of class 1
+    pred = int(prob >= 0.5)
+    label = "malicious" if pred == 1 else "normal"
 
     return {
-        'predicted_class': pred,
-        'probability': proba,
-        'prediction_label': 'MALICIOUS' if pred==1 else 'BENIGN'
+        "predicted_class": pred,
+        "probability": prob,
+        "prediction_label": label
     }
-
-
-def demo_prediction(model: CatBoostClassifier, X_test: pd.DataFrame):
-    """Demonstrate predictions on sample test packets."""
-    print(f"\n{'='*60}\nSTEP 6: Prediction Demo\n{'='*60}")
-    samples = X_test.sample(min(3, len(X_test)), random_state=RANDOM_STATE)
-    for idx, (_, row) in enumerate(samples.iterrows(),1):
-        features = row.to_dict()
-        result = predict_packet(features)
-        print(f"Sample {idx}: entropy={features.get('entropy',0):.2f}, "
-              f"payload_len={features.get('payload_len',0)}, "
-              f"has_shellcode={features.get('has_shellcode_pattern',0)}")
-        print(f"→ Prediction: {result['prediction_label']}, Confidence: {result['probability']:.1%}\n")
-
-
-def main():
-    print("\n" + "="*60)
-    print(" NETWORK PACKET MALWARE CLASSIFIER")
-    print(" Powered by CatBoost")
-    print("="*60)
-    try:
-        df = load_data(CSV_FILE)
-        X, y = preprocess_data(df)
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=RANDOM_STATE, stratify=y
-        )
-        print(f"\nTrain: {len(X_train)} | Test: {len(X_test)}")
-
-        model, training_time = train_model(X_train, y_train, X_test, y_test)
-        metrics = evaluate_model(model, X_test, y_test)
-        save_model(model, list(X.columns), metrics, training_time)
-        demo_prediction(model, X_test)
-
-        print(f"\n{'='*60}\n✓ PIPELINE COMPLETED SUCCESSFULLY\n{'='*60}\n")
-    except Exception as e:
-        print(f"\n❌ ERROR: {e}")
-        raise
 
 
 if __name__ == "__main__":

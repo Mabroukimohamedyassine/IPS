@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """
 NFQueue Packet Filter with ML Decision
-Uses T.py to extract features
+Uses Transform.py to extract features in 19-column format
 Uses ml.py (CatBoost model) to classify packets
 """
 
 import logging
 from netfilterqueue import NetfilterQueue
 from scapy.all import IP
+import pandas as pd
 
-# Import T function
-from Transform import packet_to_dataframe_enhanced
+# Import updated Transform function
+from Transform import packet_to_ml_format
 
-# Import ML prediction function
+# Import ML prediction function (should take a DataFrame row or dict)
 from ml import predict_packet
 
 # Configuration
@@ -21,7 +22,7 @@ QUEUE_NUM = 0
 # Setup logging
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
+    format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -41,21 +42,23 @@ def process_packet(nfpacket):
         nfpacket.accept()
         return
 
-    # 2. Extract packet features into a dataframe
-    df_packet = packet_to_dataframe_enhanced(
-        scapy_pkt,
-        include_advanced_features=True
-    )
+    # 2. Extract packet features into a dataframe (19-column format)
+    try:
+        df_packet = packet_to_ml_format(scapy_pkt)
+    except Exception as e:
+        logger.error(f"Feature extraction failed: {e}")
+        nfpacket.accept()
+        return
 
     if df_packet is None or df_packet.empty:
         logger.warning("Empty feature set, accepting packet.")
         nfpacket.accept()
         return
 
-    # Convert the single-row DF to a dict
+    # Convert the single-row DF to dict for predict_packet
     features = df_packet.iloc[0].to_dict()
 
-    # 3. ML decision
+    # 3. ML prediction
     try:
         result = predict_packet(features)
     except Exception as e:
@@ -63,9 +66,9 @@ def process_packet(nfpacket):
         nfpacket.accept()
         return
 
-    pred = result["predicted_class"]
-    prob = result["probability"]
-    label = result["prediction_label"]
+    pred = result.get("predicted_class", 0)
+    prob = result.get("probability", 0.0)
+    label = result.get("prediction_label", "normal")
 
     logger.info(f"ML Decision → {label} ({prob:.2%})")
 
