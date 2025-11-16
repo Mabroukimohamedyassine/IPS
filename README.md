@@ -1,140 +1,135 @@
-# Intrusion Prevention System (IPS) — Real-Time Packet Capture and ML-Based Filtering
-A Python-based Intrusion Prevention System (IPS) that captures network packets, extracts features into a structured format, and classifies each packet as malicious or benign using a machine learning model.
+Network Packet Malware Classifier
 
-This project uses NFQueue for packet interception and CatBoost for classification.
+A real-time network packet filter powered by machine learning. This project classifies network packets as normal or malicious using a CatBoost model, integrating NFQueue for packet interception and Scapy for packet parsing and feature extraction.
 
-Table of Contents
+🚀 Overview
 
-Project Overview
+This system captures live network traffic, extracts relevant features from each packet, preprocesses them, and predicts whether the packet is malicious. Based on the prediction, it can automatically accept or drop packets, providing a smart, AI-driven firewall mechanism.
 
-Architecture
+🛠 How It Works – Pipeline Steps
+1. Packet Interception
 
-Features
+Uses NFQueue to capture live packets on your system.
 
-Project Structure
+Requires administrator/root privileges.
 
-Installation
+2. Feature Extraction
 
-Usage
+Transform.py converts Scapy packets into a structured feature dictionary with 19 key fields, including:
 
-Training the ML Model
+protocol_type, service, flag, src_bytes, dst_bytes, land, etc.
 
-Future Improvements
+Features are chosen for their relevance to malware detection.
 
-Project Overview
+3. Preprocessing
 
-The IPS captures incoming packets in real-time, extracts relevant features, and uses a machine learning classifier to make decisions. It then accepts safe packets or drops malicious ones immediately.
+Categorical data (protocol, service, TCP flags) → one-hot encoded.
 
-Key advantages:
+Numerical features → normalized and missing values handled.
 
-Lightweight, real-time packet processing
+Labels: "normal." = 0, others = 1 (“malicious”).
 
-Payload-aware feature extraction
+4. Prediction
 
-ML-based threat detection
+Preprocessed features are passed to a CatBoost classifier loaded from disk.
 
-Architecture
-           ┌────────────┐        ┌──────────────┐        ┌───────────┐
-Incoming → │ Packet      │  NFQ   │ transform.py │  ML    │ Decision  │
-Packets    │ Capture     │ ────→  │ (DataFrame)  │ ────→ │ ACCEPT/DROP
-           └────────────┘        └──────────────┘        └───────────┘
+Model outputs:
 
+predicted_class (0 or 1)
 
-Step-by-Step Flow:
+prediction_label (normal / malicious)
 
-Packet Capture (NFQueue): Intercepts packets from the network in real-time.
+probability (likelihood of being malicious)
 
-Packet Transformation: transform.py converts packets into a Pandas DataFrame with structured features (protocol, payload stats, metadata).
+5. Action
 
-ML Classification: CatBoost predicts whether a packet is malicious or benign.
+If malicious (predicted_class == 1) → packet is dropped.
 
-Decision Enforcement: Safe packets are accepted, malicious packets are dropped.
+Otherwise → packet is accepted.
 
-Features
+📁 Files and Their Roles
+File	Purpose
+ml.py	Main ML pipeline: preprocesses data, trains and saves CatBoost model, evaluates metrics, predicts packet classes.
+Transform.py	Converts raw Scapy packets into feature dictionaries suitable for ML.
+Main NFQueue script	Integrates packet capture, ML predictions, and firewall actions in real-time.
+⚙️ Key Variables & Parameters
+Variable	Description
+CSV_FILE	Path to the packet dataset used for training.
+MODEL_FILE	Path to save/load the trained CatBoost model.
+METADATA_FILE	Stores model metadata (features, metrics, training info).
+RANDOM_STATE	Ensures reproducible train/test splits.
+HYPERPARAMS	CatBoost parameters: iterations, learning rate, depth, GPU/CPU usage.
+🧩 Model Features (Packet Attributes)
 
-Real-time packet interception using NFQueue
+Core features include: protocol_type, service, flag, src_bytes, dst_bytes, land, etc.
 
-Packet-to-DataFrame transformation for ML input
+Categorical features are one-hot encoded, e.g., protocol_type_tcp, service_http.
 
-ML-based detection using CatBoost
+🤖 Why CatBoost for Malware Detection?
 
-Immediate packet DROP/ACCEPT decision
+CatBoost is a gradient boosting library optimized for tabular data with categorical features.
 
-Modular and extendable design
+Advantages:
 
-Project Structure
-IPS/
-│
-├── Capture/
-│   └── nfqueue_runner.py        # Real-time packet interception
-│
-├── Preprocessing/
-│   └── transform.py             # Converts packet → pandas DataFrame
-│
-├── ML/
-│   ├── dataset.csv              # Synthetic or real dataset
-│   ├── train_model.py           # CatBoost training pipeline
-│   └── model.cbm                # Saved trained model
-│
-├── README.md                    # Project documentation
-└── requirements.txt             # Python dependencies
+Handles categorical features natively.
 
-Installation
+Works well on small and large datasets.
 
-Clone the repository:
+Fast training with GPU support.
 
-git clone https://github.com/yourusername/IPS.git
-cd IPS
+Robust against overfitting with built-in regularization.
 
+Application:
 
-Create a virtual environment and install dependencies:
+Network traffic is mostly tabular with many categorical fields (protocols, services, flags).
 
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-pip install -r requirements.txt
+CatBoost can make accurate predictions without complex feature engineering, ideal for security and anomaly detection.
 
+🧠 What is the “AI” Here?
 
-Set up NFQueue (requires root privileges):
+Supervised Machine Learning:
 
-sudo iptables -I INPUT -j NFQUEUE --queue-num 0
+Model learns from labeled packet data (“normal” vs “malicious”).
 
-Usage
+Generalizes to unseen traffic patterns.
 
-Start the NFQueue runner:
+Automates cybersecurity response.
 
-python Capture/nfqueue_runner.py
+Factors Affecting Predictions:
 
+Packet features: length, protocol, TCP flags, port/service, fragmentation, login attempts, file creation, etc.
 
-Each captured packet will be transformed and classified automatically.
+CatBoost hyperparameters: iterations, depth, learning rate.
 
-Decisions (ACCEPT/DROP) are applied in real-time.
+Distribution and labeling of underlying dataset.
 
-Training the ML Model
+⚡ How to Run
 
-CatBoost is used because it handles mixed numerical and categorical data, missing values, and small datasets efficiently.
+Prepare the dataset
 
-To train a new model:
+Place a properly formatted CSV file (19 columns) in the specified path.
 
-python ML/train_model.py
+Train the model
+
+python ml.py
 
 
-This script will:
+Preprocesses data, trains CatBoost, evaluates metrics, and saves the model.
 
-Load the dataset (dataset.csv)
+Set up NFQueue
 
-Preprocess features
+Configure your OS to forward packets to NFQueue (requires admin/root).
 
-Train the CatBoost model
+Run main script
 
-Save the model as model.cbm
+Start the live packet filtering pipeline. Packets will be classified and acted upon in real-time.
 
-Future Improvements
+📝 Summary Review
 
-Integrate anomaly detection alongside CatBoost
+Uses categorical features like protocols, ports, and flags.
 
-Add logging and alert dashboard
+Employs supervised ML (CatBoost) to predict from labeled data.
 
-Extend with protocol-specific features
+Implements feature engineering on packet properties.
 
-Optional integration with Suricata or other IDS systems
+Automates firewall actions based on real-time ML predictions.
